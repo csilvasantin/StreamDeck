@@ -1,7 +1,10 @@
--- Guardar app en primer plano
-tell application "System Events"
-    set frontApp to name of first application process whose frontmost is true
-end tell
+-- Guardar app en primer plano (con manejo de error por si Stream Deck no tiene frontmost)
+set frontApp to ""
+try
+    tell application "System Events"
+        set frontApp to name of first application process whose frontmost is true
+    end tell
+end try
 
 -- Activar Codex y enviar Enter (aprobación)
 tell application "Codex" to activate
@@ -12,6 +15,8 @@ end tell
 
 -- Devolver foco al app original
 delay 0.2
-if frontApp is not "Codex" then
-    tell application frontApp to activate
+if frontApp is not "" and frontApp is not "Codex" then
+    try
+        tell application frontApp to activate
+    end try
 end if
