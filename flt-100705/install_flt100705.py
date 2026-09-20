@@ -9,11 +9,27 @@ HOME = Path("/Users/csilvasantin")
 PROFILES = HOME / "Library/Application Support/com.elgato.StreamDeck/ProfilesV3"
 PROFILE_ID = "6041EB74-86AB-42B5-8FEE-D1F8E4079C93.sdProfile"
 PAGE_ID = "4F80C30E-4507-4783-89B6-D0C08C6D1AB8"
-HELPERS = HOME / "Applications/StreamDeck Helpers/Admira Live"
+HELPERS_CANDIDATES = [
+    HOME / "Applications/StreamDeck Helpers/Admira Live",
+    HOME / "Applications/Stream Deck Helpers/Admira Live",
+    HOME / "Applications/StreamDeckHelpers/Admira Live",
+]
+def resolve_helpers():
+    for c in HELPERS_CANDIDATES:
+        if c.exists():
+            return c
+    # default create at first
+    return HELPERS_CANDIDATES[0]
+HELPERS = resolve_helpers()
 CLI = HOME / ".codex/streamdeck-admira-live/admira_live_cli.py"
+if not CLI.exists():
+    alt = HOME / ".codex/streamdeck-admira-live/admira_live_cli.py"
+    if alt.exists():
+        CLI = alt
 STAGING = HOME / "Admira/streamdeck-scumm-flt100705"
 BACKUP_ROOT = HOME / "Admira/backups"
 OPEN_PLUGIN = "com.elgato.streamdeck.system.open"
+OPEN_PLUGIN_ALTS = ("com.elgato.streamdeck.system.open", "com.elgato.streamdeck.system.open")
 TS = datetime.now().strftime("%Y%m%d-%H%M%S")
 
 KEYS = {
