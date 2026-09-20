@@ -270,6 +270,13 @@ def rewrite_manifest(page_dir: Path, icons_dir: Path):
         new["UUID"] = OPEN_PLUGIN
         new["Name"] = "Open"
         new["Plugin"] = {"Name": "Open", "UUID": OPEN_PLUGIN, "Version": "1.0"}
+        # LinkedTitle FALSE, y no lo que trajera la muestra. Con True, Stream Deck
+        # 7.4.2 no reconoce la tecla al arrancar: la RE-ENVUELVE en la forma
+        # antigua {"Actions":[…]} y de paso le VACIA los States, asi que la tecla
+        # sigue abriendo la app pero se queda sin icono ni rotulo. Visto en vivo en
+        # el MacMini: escrita con True aguantaba el primer arranque y a los pocos
+        # minutos aparecia envuelta y en blanco.
+        new["LinkedTitle"] = False
         new.setdefault("Settings", {})["path"] = path_setting
         new.pop("Actions", None)          # restos de la forma vieja, si los hubiera
         if not new.get("States"):
