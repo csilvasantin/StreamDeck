@@ -225,11 +225,23 @@ def rewrite_manifest(page_dir: Path, icons_dir: Path):
             hotkey_aside[k] = json.loads(json.dumps(v))
             log("aside hotkey %s title=%r" % (k, title))
 
-    # Remap 9 Open keys
+    # Remap 9 Open keys.
+    #
+    # OJO CON LA FORMA (MorfeoMacMini, 2026-09-20). En ProfilesV3 —Stream Deck
+    # 7.4.2— cada tecla es una accion PLANA:
+    #     {"ActionID":…, "Name":"Open", "Plugin":{…}, "Settings":{…},
+    #      "States":[…], "UUID":"com.elgato.streamdeck.system.open"}
+    # NO un envoltorio con una lista "Actions" dentro, que es la forma vieja.
+    # Buscando la muestra por ov["Actions"][0] no se encontraba nunca, se caia al
+    # camino de respaldo y ese escribia el envoltorio antiguo: sin UUID ni Plugin
+    # de primer nivel. La app lo lee como TECLA VACIA, asi que el script no
+    # instalaba nada: BORRABA las nueve y decia "INSTALL DONE". Pasó de verdad en
+    # el MacMini y hubo que reescribir el manifest a mano.
     sample = None
     for ov in actions.values():
-        acts = ov.get("Actions") or []
-        if acts and (acts[0].get("UUID") == OPEN_PLUGIN or acts[0].get("Name") == "Open"):
+        if not isinstance(ov, dict):
+            continue
+        if ov.get("UUID") == OPEN_PLUGIN or ov.get("Name") == "Open":
             sample = ov
             break
 
@@ -238,29 +250,36 @@ def rewrite_manifest(page_dir: Path, icons_dir: Path):
         path_setting = '"%s"' % app
         if sample:
             new = json.loads(json.dumps(sample))
-            if new.get("Actions"):
-                new["Actions"][0].setdefault("Settings", {})["path"] = path_setting
-                new["Actions"][0]["UUID"] = OPEN_PLUGIN
-                new["Actions"][0]["Name"] = "Open"
-            if new.get("States"):
-                new["States"][0]["Image"] = icon_name
-                new["States"][0]["Title"] = title
-                new["States"][0]["ShowTitle"] = False
-            actions[pos] = new
         else:
-            actions[pos] = {
-                "Actions": [{
-                    "Name": "Open",
-                    "Settings": {"path": path_setting},
-                    "State": 0,
-                    "UUID": OPEN_PLUGIN,
-                }],
+            # Sin muestra en esta pagina, se construye la accion plana entera.
+            new = {
+                "LinkedTitle": True,
+                "Name": "Open",
+                "Plugin": {"Name": "Open", "UUID": OPEN_PLUGIN, "Version": "1.0"},
+                "Resources": None,
+                "State": 0,
                 "States": [{
-                    "Image": icon_name,
-                    "Title": title,
-                    "ShowTitle": False,
+                    "FontFamily": "", "FontSize": 10, "FontStyle": "",
+                    "FontUnderline": False, "OutlineThickness": 2,
+                    "TitleAlignment": "bottom", "TitleColor": "#ffffff",
                 }],
             }
+        # ActionID propio: clonar el de la muestra deja nueve teclas con el mismo
+        # identificador y la app se lia al guardar.
+        new["ActionID"] = str(uuid.uuid4())
+        new["UUID"] = OPEN_PLUGIN
+        new["Name"] = "Open"
+        new["Plugin"] = {"Name": "Open", "UUID": OPEN_PLUGIN, "Version": "1.0"}
+        new.setdefault("Settings", {})["path"] = path_setting
+        new.pop("Actions", None)          # restos de la forma vieja, si los hubiera
+        if not new.get("States"):
+            new["States"] = [{}]
+        # El manifest guarda la imagen RELATIVA a la pagina: "Images/SCUMM_01.png".
+        # Con el nombre pelado la tecla sale en negro.
+        new["States"][0]["Image"] = "Images/" + icon_name
+        new["States"][0]["Title"] = title
+        new["States"][0]["ShowTitle"] = False     # el icono ya trae la palabra dibujada
+        actions[pos] = new
         log("SET %s -> %s -> %s" % (pos, title, app))
 
     # Restore hotkeys at their original coords (do not overwrite our new 9 if conflict —
@@ -339,7 +358,19 @@ def main():
 
     actions, man = rewrite_manifest(page_dir, icons)
 
-    run('open -a "Stream Deck"', check=False)
+    # La app se llama "Elgato Stream Deck" en /Applications; con "Stream Deck" a
+    # secas macOS responde "Unable to find application named" y el teclado se
+    # quedaba MUERTO, porque el killall de arriba si acierta (ese es el nombre del
+    # proceso, no el del bundle). Se prueban los dos nombres y se comprueba.
+    relanzada = False
+    for nombre in ("Elgato Stream Deck", "Stream Deck"):
+        r = run('open -a "%s"' % nombre, check=False)
+        if r.returncode == 0:
+            relanzada = True
+            log("relanzada como %r" % nombre)
+            break
+    if not relanzada:
+        log("AVISO: no se pudo relanzar Stream Deck; abrela a mano")
     time.sleep(2)
 
     # re-read
@@ -350,9 +381,36 @@ def main():
     print("BACKUP=" + bak)
     print("MANIFEST=" + man)
     # helpers check
+    problemas = []
     for _pos, (_t, app_name, _v, _i) in KEYS.items():
         ok = (HELPERS / app_name).exists()
         print("helper %s: %s" % (app_name, "OK" if ok else "MISSING"))
+        if not ok:
+            problemas.append("helper ausente: " + app_name)
+
+    # COMPROBAR DE VERDAD ANTES DE CANTAR VICTORIA. La version anterior imprimia
+    # "INSTALL DONE" y salia con 0 aunque la rejilla hubiera quedado con las nueve
+    # teclas vacias: el que lo lanzaba se creia que estaba puesto. Si algo no
+    # cuadra, se dice y se sale con error, que para eso esta el backup.
+    for pos, (title, app_name, _v, icon_name) in KEYS.items():
+        a = actions.get(pos) or {}
+        st = (a.get("States") or [{}])[0]
+        if a.get("UUID") != OPEN_PLUGIN:
+            problemas.append("%s (%s): sin accion Open (UUID=%r)" % (pos, title, a.get("UUID")))
+        ruta = (a.get("Settings") or {}).get("path", "").strip('"')
+        if not ruta or not os.path.exists(ruta):
+            problemas.append("%s (%s): ruta inexistente %r" % (pos, title, ruta))
+        if st.get("Image") != "Images/" + icon_name:
+            problemas.append("%s (%s): icono %r" % (pos, title, st.get("Image")))
+    if not relanzada:
+        problemas.append("Stream Deck no relanzado")
+
+    if problemas:
+        print("=== FLT-100705 INSTALL FALLIDO ===")
+        for p in problemas:
+            print("  ! " + p)
+        print("Restaura con: tar xzf '%s' -C /" % bak)
+        sys.exit(1)
     print("=== FLT-100705 INSTALL DONE ===")
 
 if __name__ == "__main__":
